@@ -1,0 +1,10 @@
+*.o
+*.so
+*.a
+bin/
+obj/
+
+*.log
+*.json
+
+.DS_Store
