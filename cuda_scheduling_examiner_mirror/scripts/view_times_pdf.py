@@ -1,3 +1,7 @@
+#!/usr/bin/env python
+#
+# Supports Python 2 and Python 3
+from __future__ import print_function
 import glob
 import itertools
 import json
@@ -7,6 +11,7 @@ import re
 import sys
 import argparse
 from scipy import stats
+import os
 
 def get_benchmark_raw_values(benchmark, times_key):
     """Takes a parsed benchmark result JSON file and returns raw values of the
@@ -17,7 +22,7 @@ def get_benchmark_raw_values(benchmark, times_key):
         if not times_key in t:
             continue
         times = t[times_key]
-        for i in range(len(times) / 2):
+        for i in range(len(times) // 2):
             start_index = i * 2
             end_index = i * 2 + 1
             milliseconds = (times[end_index] - times[start_index]) * 1000.0
@@ -132,12 +137,15 @@ def plot_scenario(benchmarks, name, times_key):
     for i in range(len(raw_data_array)):
         density = stats.kde.gaussian_kde(raw_data_array[i])
         x = get_x_range(raw_data_array[i])
-        axes.plot(x, density(x), label=labels[i], **(style_cycler.next()))
+        axes.plot(x, density(x), label=labels[i], **(next(style_cycler)))
     add_plot_padding(axes)
     axes.set_xlabel("Time (milliseconds)")
     axes.set_ylabel("Density")
     legend = plot.legend()
-    legend.draggable()
+    try:
+        legend.draggable()
+    except:
+        legend.set_draggable(True)
     return figure
 
 def show_plots(filenames, times_key="block_times"):
@@ -157,20 +165,30 @@ def show_plots(filenames, times_key="block_times"):
         scenarios[scenario].append(benchmark)
     figures = []
     for scenario in scenarios:
-        print scenario
+        print(scenario)
         figures.append(plot_scenario(scenarios[scenario], scenario, times_key))
     plot.show()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--directory",
-        help="Directory containing result JSON files.", default='./results')
     parser.add_argument("-k", "--times_key",
         help="JSON key name for the time property to be plot.",
         default="block_times")
     parser.add_argument("-r", "--regex",
-        help="Regex for JSON files to be processed",
+        help="Regex for which to match JSON files in passed directories",
         default="*.json")
+    parser.add_argument("result_file_to_plot", nargs="*", default=["./results"],
+        help="List of result files, or directories of result files, to plot (./results default)")
     args = parser.parse_args()
-    filenames = glob.glob(args.directory + "/" + args.regex)
+    filenames = []
+    # If a positional argument is a directory, it's automatically expanded out
+    # to include all contained *.json files.
+    for f in args.result_file_to_plot:
+        if os.path.isdir(f):
+            filenames.extend(glob.glob(f + "/" + args.regex))
+        elif os.path.isfile(f):
+            filenames.append(f)
+        else:
+            print("Input path '%s' not found as valid file or directory." % f, file=sys.stderr)
+            exit(1)
     show_plots(filenames, args.times_key)

@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -61,6 +62,8 @@ typedef struct {
   int barrier_created;
   // A list of settings for individual tasks.
   struct TaskConfig_ *task_configs;
+  // Used to force all other running threads to end at the next iteration.
+  int *terminate;
 } SharedState;
 
 // Holds data about a given benchmark, in addition to configuration parameters.
@@ -73,6 +76,7 @@ typedef struct TaskConfig_ {
   // Limits on how long the benchmark should run.
   int64_t max_iterations;
   double max_seconds;
+  int terminator;
   // The number of seconds the benchmark should sleep before its first
   // iteration. If negative, the benchmark will begin iterating immediately.
   double release_time;
@@ -222,7 +226,7 @@ static int SetCPUAffinity(TaskConfig *config) {
 
 // Formats the given timing information as a JSON object and appends it to the
 // output file. Returns 0 on error and 1 on success. Times will be written in a
-// floatig-point number of *seconds*, even though they are recorded in ns. This
+// floating-point number of *seconds*, even though they are recorded in ns. This
 // code should not be included in benchmark timing measurements.
 static int WriteTimesToOutput(FILE *output, TimingInformation *times,
     SharedState *shared_state, TaskConfig *config) {
@@ -318,7 +322,6 @@ static int WriteTimesToOutput(FILE *output, TimingInformation *times,
       return 0;
     }
   }
-  fflush(output);
   return 1;
 }
 
@@ -390,7 +393,6 @@ static int WriteOutputHeader(TaskConfig *config) {
   if (fprintf(output, "\"times\": [{}") < 0) {
     return 0;
   }
-  fflush(output);
   return 1;
 }
 
@@ -476,6 +478,9 @@ static void* RunBenchmark(void *data) {
     if (config->max_seconds > 0) {
       if ((CurrentSeconds() - start_time) >= config->max_seconds) break;
     }
+    if (*(config->shared_state->terminate)) {
+      break;
+    }
     // If sync_every_iteration is true, we'll wait here for previous iterations
     // of all benchmarks to complete.
     if (config->shared_state->global_config->sync_every_iteration) {
@@ -528,6 +533,16 @@ static void* RunBenchmark(void *data) {
       return NULL;
     }
   }
+  if (fprintf(config->output_file, "\n]}") < 0) {
+    printf("Failed writing footer to output file.\n");
+    return NULL;
+  }
+  // Only flush the benchmark log when its complete
+  fflush(config->output_file);
+  // Signal all other benchmarks to terminate
+  if (config->terminator) {
+    *(config->shared_state->terminate) = 1;
+  }
   // Wait before cleaning up any benchmarks due to CUDA free causing implicit
   // synchronization that blocks the CPU.
   if (!BarrierWait(barrier, &local_sense)) {
@@ -535,10 +550,6 @@ static void* RunBenchmark(void *data) {
     return NULL;
   }
   if (benchmark->cleanup) benchmark->cleanup(user_data);
-  if (fprintf(config->output_file, "\n]}") < 0) {
-    printf("Failed writing footer to output file.\n");
-    return NULL;
-  }
   return (void *) 1;
 }
 
@@ -619,10 +630,9 @@ static char* GetLogFileName(GlobalConfiguration *config, int benchmark_index) {
 
 // This is used to cycle to the next valid CPU core in the set of available
 // CPUs, since they may not be strictly in-order.
-static int CycleToNextCPU(int count, int current_cpu, cpu_set_t *cpu_set) {
-  if (count <= 1) return current_cpu;
+static int CycleToNextCPU(int current_cpu, cpu_set_t *cpu_set) {
   while (1) {
-    current_cpu = (current_cpu + 1) % count;
+    current_cpu = (current_cpu + 1) % CPU_SETSIZE;
     if (CPU_ISSET(current_cpu, cpu_set)) return current_cpu;
   }
 }
@@ -637,7 +647,7 @@ static TaskConfig* CreateTaskConfigs(SharedState *shared_state) {
   BenchmarkConfiguration *benchmark = NULL;
   char *log_name;
   int i = 0;
-  int cpu_count, current_cpu_core;
+  int current_cpu_core;
   TaskConfig *new_list = NULL;
   GlobalConfiguration *config = shared_state->global_config;
   cpu_set_t cpu_set;
@@ -648,20 +658,20 @@ static TaskConfig* CreateTaskConfigs(SharedState *shared_state) {
     return NULL;
   }
   memset(new_list, 0, config->benchmark_count * sizeof(TaskConfig));
-  // This CPU count shouldn't be the number of available CPUs, but simply the
-  // number at which our cyclic assignment to CPU cores rolls over.
-  cpu_count = sysconf(_SC_NPROCESSORS_CONF);
-  // Normally, start the current CPU at core 1, but there won't be a core 1 on
-  // a single-CPU system, in which case use core 0 instead.
-  if (cpu_count <= 1) {
-    current_cpu_core = 0;
-  } else {
-    current_cpu_core = 1;
-  }
+  // This CPU-assignment logic uses CPU sets, rather than starting at core 0
+  // and counting up, as only a subset of cores may be available to us (for
+  // example, if using a partitioned scheduler, such as the default on the
+  // longleaf.unc.edu compute cluster).
   CPU_ZERO(&cpu_set);
   if (sched_getaffinity(0, sizeof(cpu_set), &cpu_set) != 0) {
     printf("Failed getting CPU list.\n");
     goto ErrorCleanup;
+  }
+  // Avoid using core 0 unless it's the only one available.
+  if (CPU_COUNT(&cpu_set) <= 1 && CPU_ISSET(0, &cpu_set)) {
+    current_cpu_core = 0;
+  } else {
+    current_cpu_core = CycleToNextCPU(1, &cpu_set);
   }
   for (i = 0; i < config->benchmark_count; i++) {
     benchmark = config->benchmarks + i;
@@ -675,6 +685,7 @@ static TaskConfig* CreateTaskConfigs(SharedState *shared_state) {
     if (benchmark->max_time >= 0) {
       new_list[i].max_seconds = benchmark->max_time;
     }
+    new_list[i].terminator = benchmark->terminator;
     new_list[i].parameters.cuda_device = config->cuda_device;
     new_list[i].label = benchmark->label;
     new_list[i].mps_thread_percentage = benchmark->mps_thread_percentage;
@@ -689,9 +700,9 @@ static TaskConfig* CreateTaskConfigs(SharedState *shared_state) {
     // Either cycle through CPUs or use the per-benchmark CPU core.
     if (config->pin_cpus) {
       new_list[i].cpu_core = current_cpu_core;
-      current_cpu_core = CycleToNextCPU(cpu_count, current_cpu_core, &cpu_set);
+      current_cpu_core = CycleToNextCPU(current_cpu_core, &cpu_set);
     } else {
-      // Check that if the user specified a GPU that it's a valid one
+      // Check that if the user specified a CPU that it's a valid one
       if ((benchmark->cpu_core != USE_DEFAULT_CPU_CORE) && !CPU_ISSET(
         benchmark->cpu_core, &cpu_set)) {
         printf("CPU core %d doesn't exist/isn't available.\n",
@@ -713,6 +724,9 @@ static TaskConfig* CreateTaskConfigs(SharedState *shared_state) {
       goto ErrorCleanup;
     }
     free(log_name);
+    // Use a large block buffer to prevent I/O waiting in the hot loop
+    void* block_buf = malloc(300*1024*1024); // 300 MiB
+    setvbuf(new_list[i].output_file, block_buf, _IOFBF, 300*1024*1024);
     // Finally, open the shared library and get the function pointers.
     new_list[i].library_handle = dlopen(benchmark->filename, RTLD_NOW);
     if (!new_list[i].library_handle) {
@@ -866,6 +880,7 @@ static void Cleanup(void *data) {
   if (state->barrier_created) {
     BarrierDestroy(&(state->barrier));
   }
+  munmap(state->terminate, sizeof(int));
   if (state->task_configs) {
     FreeTaskConfigs(state->task_configs,
       state->global_config->benchmark_count);
@@ -920,6 +935,7 @@ static void *Initialize(InitializationParameters *params) {
     return NULL;
   }
   shared_state->barrier_created = 1;
+  shared_state->terminate = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
   shared_state->starting_seconds = CurrentSeconds();
   // After the heavy initialization work has been done, record an approximate
   // GPU time and system time.

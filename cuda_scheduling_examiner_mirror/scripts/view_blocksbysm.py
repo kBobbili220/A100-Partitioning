@@ -4,16 +4,17 @@
 # GPU, including which SM they ran on. For this to work, all result filenames
 # must end in .json.
 #
-# Only Python 2 is supported.
-#
 # Usage: python view_blocksbysm.py -d [results directory (default: ./results)]
-import time
+#
+# Supports Python 2 and Python 3
+from __future__ import print_function
 import argparse
 import glob
 import json
 import math
 import re
 import sys
+import os
 
 from graphics import *
 
@@ -51,35 +52,13 @@ idToColorMap = {0: 'azure',
                 6: 'orange',
                 7: 'gray32',
                 8: 'turquoise3',
-                9: 'light pink',
-                10: 'light blue',
-                11: 'LightGoldenrod2',
-                12: 'light sea green',
-                13: 'MediumPurple1',
-                14: 'azure',
-                15: 'light pink',
-                16: 'LightGoldenrod2',
-                17: 'DarkSeaGreen1',
-                18: 'MediumPurple1',
-                19: 'light gray',
-                20: 'orange',
-                21: 'gray32',
-                22: 'turquoise3',
-                23: 'light pink',
-                24: 'light blue',
-                25: 'LightGoldenrod2',
-                26: 'light sea green',
-                27: 'gray32',
-                28: 'orange',
-                29: 'turquoise3',
-                30: 'light pink',
-                31: 'light blue',
-                32: 'LightGoldenrod2',
-                33: 'brown',
-                22: 'DarkOliveGreen',
-                23: 'deep pink',
-                24: 'gold1',
-                25: 'gold4'}
+                9: 'light blue',
+                10: 'light sea green',
+                11: 'brown',
+                12: 'DarkOliveGreen',
+                13: 'deep pink',
+                14: 'gold1',
+                15: 'gold4'}
 
 patternColorToBgColorMap = {"light pink": "misty rose",
                             "azure": "sky blue",
@@ -97,8 +76,7 @@ patternColorToBgColorMap = {"light pink": "misty rose",
                             "gold4": "light slate gray",
                             "light blue": "azure",
                             "LightGoldenrod2": "LightGoldenrod3",
-                            "light sea green": "dark sea green",
-                            }
+                            "light sea green": "dark sea green"}
 
 patternColorToArrowColorMap = {"light pink": "IndianRed3",
                                "azure": "SteelBlue2",
@@ -115,8 +93,7 @@ patternColorToArrowColorMap = {"light pink": "IndianRed3",
                                "gold1": "gold1",
                                "gold4": "gold4",
                                "light blue": "dark blue",
-                               "light sea green":"light sea green"
-}
+                               "light sea green": "light sea green"}
 
 BUFFER_TOP = 32
 BUFFER_BOTTOM = 68
@@ -291,6 +268,9 @@ class RightDiagonalLinePattern(Pattern):
             line.setWidth(LINE_WIDTH)
             self.objs.append(line)
 
+# Ordered such that all permutations of the four patterns and 16 colors will be
+# displayed. More color/pattern options would be required to support more
+# permutations.
 idToPatternMap = {0: HorizontalLinePattern,
                   1: RightDiagonalLinePattern,
                   2: VerticalLinePattern,
@@ -301,31 +281,63 @@ idToPatternMap = {0: HorizontalLinePattern,
                   7: HorizontalLinePattern,
                   8: VerticalLinePattern,
                   9: RightDiagonalLinePattern,
-                  10: LeftDiagonalLinePattern,
-                  11: HorizontalLinePattern,
+                  10: HorizontalLinePattern,
+                  11: LeftDiagonalLinePattern,
                   12: VerticalLinePattern,
-                  13: RightDiagonalLinePattern,
-                  14: LeftDiagonalLinePattern,
-                  15: HorizontalLinePattern,
-                  16: VerticalLinePattern,
-                  17: RightDiagonalLinePattern,
-                  18: LeftDiagonalLinePattern,
-                  19: HorizontalLinePattern,
-                  20: VerticalLinePattern,
-                  21: RightDiagonalLinePattern,
-                  22: LeftDiagonalLinePattern,
-                  23: HorizontalLinePattern,
-                  24: VerticalLinePattern,
-                  25: LeftDiagonalLinePattern,
-                  26: RightDiagonalLinePattern,
-                  27: HorizontalLinePattern,
-                  28: RightDiagonalLinePattern,
-                  29: VerticalLinePattern,
-                  30: LeftDiagonalLinePattern,
-                  31: VerticalLinePattern,
+                  13: HorizontalLinePattern,
+                  14: RightDiagonalLinePattern,
+                  15: LeftDiagonalLinePattern,
+
+                  16: LeftDiagonalLinePattern,
+                  17: VerticalLinePattern,
+                  18: HorizontalLinePattern,
+                  19: RightDiagonalLinePattern,
+                  20: HorizontalLinePattern,
+                  21: VerticalLinePattern,
+                  22: RightDiagonalLinePattern,
+                  23: LeftDiagonalLinePattern,
+                  24: HorizontalLinePattern,
+                  25: VerticalLinePattern,
+                  26: LeftDiagonalLinePattern,
+                  27: RightDiagonalLinePattern,
+                  28: LeftDiagonalLinePattern,
+                  29: RightDiagonalLinePattern,
+                  30: VerticalLinePattern,
+                  31: HorizontalLinePattern,
+
                   32: RightDiagonalLinePattern,
-                  33: LeftDiagonalLinePattern,
-                  34: HorizontalLinePattern}
+                  33: HorizontalLinePattern,
+                  34: LeftDiagonalLinePattern,
+                  35: VerticalLinePattern,
+                  36: RightDiagonalLinePattern,
+                  37: LeftDiagonalLinePattern,
+                  38: HorizontalLinePattern,
+                  39: VerticalLinePattern,
+                  40: LeftDiagonalLinePattern,
+                  41: HorizontalLinePattern,
+                  42: RightDiagonalLinePattern,
+                  43: VerticalLinePattern,
+                  44: HorizontalLinePattern,
+                  45: VerticalLinePattern,
+                  46: LeftDiagonalLinePattern,
+                  47: RightDiagonalLinePattern,
+
+                  48: VerticalLinePattern,
+                  49: LeftDiagonalLinePattern,
+                  50: RightDiagonalLinePattern,
+                  51: HorizontalLinePattern,
+                  52: LeftDiagonalLinePattern,
+                  53: HorizontalLinePattern,
+                  54: VerticalLinePattern,
+                  55: RightDiagonalLinePattern,
+                  56: RightDiagonalLinePattern,
+                  57: LeftDiagonalLinePattern,
+                  58: VerticalLinePattern,
+                  59: HorizontalLinePattern,
+                  60: RightDiagonalLinePattern,
+                  61: LeftDiagonalLinePattern,
+                  62: HorizontalLinePattern,
+                  63: VerticalLinePattern}
 
 class PlotRect(Rectangle):
     def __init__(self, w, h):
@@ -406,7 +418,7 @@ class BlockSMRect(object):
         self.label = Text(Point(px, py), "%s:%s" % (kernelName, block.id))
         if USE_BOLD_FONT:
             self.label.setStyle("bold")
-        self.label.setSize(30)
+        self.label.setSize(10)
 
     def draw(self, canvas):
         self.block.draw(canvas)
@@ -597,7 +609,7 @@ class Title(object):
         py = int(BUFFER_TOP - 16)
 
         self.title = Text(Point(px, py), name)
-        self.title.setSize(40)
+        self.title.setSize(14)
         if USE_BOLD_FONT:
             self.title.setStyle("bold")
 
@@ -610,10 +622,10 @@ class LegendBox(object):
         self.rect.setWidth(LINE_WIDTH)
 
         if USE_PATTERNS:
-            color = idToColorMap[i]
+            color = idToColorMap[i % len(idToColorMap)]
             self.rect.setFill(patternColorToBgColorMap[color])
 
-            patternType = idToPatternMap[i]
+            patternType = idToPatternMap[i % len(idToPatternMap)]
             if patternType == HorizontalLinePattern:
                 self.pattern = patternType(self.rect, color, 2)
             elif patternType == VerticalLinePattern:
@@ -697,7 +709,6 @@ class Legend(object):
         if USE_BOLD_FONT:
             label.setStyle("bold")
         label.config["anchor"] = 'w' # hack to left-align labels
-        label.setSize(25)
         self.labels.append(label)
 
     def draw(self, canvas):
@@ -773,7 +784,6 @@ class XAxis(object):
             label.setSize(10)
             if USE_BOLD_FONT:
                 label.setStyle("bold")
-            label.setSize(20)
             self.labels.append(label)
 
         # Give the axis a label
@@ -782,7 +792,6 @@ class XAxis(object):
         label = Text(Point(px, py), "Time (seconds)")
         if USE_BOLD_FONT:
             label.setStyle("bold")
-            label.setSize(30)
         self.labels.append(label)
 
     def draw(self, canvas):
@@ -835,13 +844,10 @@ class YAxis(Rectangle):
             px = int(BUFFER_LEFT - 25)
             py = plotBottom - i * smHeight - int(0.5 * smHeight)
 
-            if i % 2 == 1:
-                continue
             label = Text(Point(px, py), "SM %d" % i)
             label.setSize(12)
             if USE_BOLD_FONT:
                 label.setStyle("bold")
-            label.setSize(20)
             self.labels.append(label)
 
     def draw(self, canvas):
@@ -891,7 +897,6 @@ class BlockSMDisplay():
         if len(benchmark.streams) > 0:
             self.numSms = int(self.benchmark.streams[0].maxResidentThreads / 2048)
             self.name = self.benchmark.streams[0].scenarioName
-        self.blocksToPlot = []
 
     def redraw(self, width, height):
         self.canvas.clear_canvas()
@@ -902,8 +907,6 @@ class BlockSMDisplay():
 
     def draw_benchmark(self):
         global LEGEND_HEIGHT
-#        # Streams need to be plotted in order of completion time
-#        self.benchmark.streams = sorted(self.benchmark.streams, key=Stream.get_end)
 
         if len(self.benchmark.streams) == 0: return
 
@@ -917,19 +920,9 @@ class BlockSMDisplay():
         smBase = [[] for j in range(self.numSms)]
         releaseDict = {}
         for i in range(len(self.benchmark.streams)):
-            color = idToColorMap[i] if USE_PATTERNS else patternColorToArrowColorMap[idToColorMap[i]]
-            patternType = idToPatternMap[i] if USE_PATTERNS else None
+            color = idToColorMap[i % len(idToColorMap)] if USE_PATTERNS else patternColorToArrowColorMap[idToColorMap[i % len(idToColorMap)]]
+            patternType = idToPatternMap[i % len(idToPatternMap)] if USE_PATTERNS else None
             self.draw_stream(self.benchmark.streams[i], color, patternType, i, smBase, releaseDict)
-
-#        for tup in sorted(self.blocksToPlot, key=lambda tup: tup[3]):
-#            block = tup[0];
-#            color = tup[1]
-#            patternType = tup[2]
-#            otherThreads = tup[3]
-#            br = BlockSMRect(block, self.firstTime, self.totalTime, self.numSms,
-#                             self.width, self.height, color, patternType, otherThreads)
-
-#            br.draw(self.canvas)
 
         # Draw the title, legend, and axes
         self.draw_title()
@@ -956,23 +949,26 @@ class BlockSMDisplay():
             myOverlap = [(0, self.totalTime, 0, block.sm, "", -1)]
             # Check every other interval already plotted for this SM
             for interval in smBase[block.sm]:
-                # If the competing interval starts before we end, and ends after we start
+                # If this competing interval overlaps with our run time
                 if interval[0] < block.end and interval[1] > block.start:
-                    # Find the sub-interval of my own that this overlaps for
+                    # Find tight bounds for the overlap
                     intervalStart = max(interval[0], block.start)
                     intervalEnd = min(interval[1], block.end)
 
-                    # Find any interval I've already built up overlap for
-                    # We break our execution interval into segments. Create a list of all segments that exist simultaniously to a competitor.
+                    # Each block's run time is broken into contiguous intervals
+                    # of time, where the number of competing blocks is constant
+                    # throughout each interval. Here, we aquire a list of all
+                    # our intervals which exist within the overlap (exist
+                    # simultaneously to this competitor)
                     myoverlappingintervals = []
                     for myinterval in myOverlap:
                         if myinterval[0] < intervalEnd and myinterval[1] > intervalStart:
                             myoverlappingintervals.append(myinterval)
 
-                    # For each interval I already know about that I overlap with,
-                    # consider a few cases
-                    # For each of our segments that exist (at some point) against a competitor,
-                    # break it into segments that either fully exist against the competitor, or exist against none at all.
+                    # For each of our intervals that exist (at some point)
+                    # against a competitor, break it into intervals that either
+                    # fully exist against the competitor, or exist against none
+                    # at all.
                     for myinterval in myoverlappingintervals:
                         # Check if my interval completely encloses this new one (in that case,
                         # split at the beginning and end of this new one)
@@ -995,12 +991,12 @@ class BlockSMDisplay():
                             myOverlap.remove(myinterval)
                             myOverlap.append((myinterval[0], intervalEnd, myinterval[2] + interval[2], myinterval[3], myinterval[4], myinterval[5]))
                             myOverlap.append((intervalEnd, myinterval[1], myinterval[2], myinterval[3], myinterval[4], myinterval[5]))
-                        # And do nothing if my interval is completely enclosed by the other one????
+                        # Otherwise my interval is completely enclosed within
+                        # the other one, and no action is necessary.
 
             for interval in myOverlap:
                 otherThreads = max(otherThreads, interval[2])
 
-#            self.blocksToPlot.append((block, color, patternType, otherThreads));
             br = BlockSMRect(block, self.firstTime, self.totalTime, self.numSms,
                              self.width, self.height, color, patternType, otherThreads)
 
@@ -1015,8 +1011,10 @@ class BlockSMDisplay():
             else:
                 pass # invalid!
 
-        # Draw a marker for the kernel release time
-        releaseBucket = int(kernel.releaseTime / 0.02)
+        # Draw a marker arrow for the kernel release time
+        # (Stack markers if releases differ by less than ~1% of plot length)
+        epsilon = (self.totalTime / 100)
+        releaseBucket = int(kernel.releaseTime / epsilon)
         releaseIdx = releaseDict.get(releaseBucket, 0)
         releaseDict[releaseBucket] = releaseIdx + 1
         krm = KernelReleaseMarker(kernel, self.firstTime, self.totalTime,
@@ -1176,36 +1174,9 @@ def plot_scenario(benchmarks, name, window_name, window_width, window_height,
     win = Window(window_name)
     graph = BlockSMDisplay(win, get_block_intervals(name, benchmarks),
                            window_width, window_height, start_time, end_time)
-    
-    # --- FIX STARTS HERE ---
     if save:
-        clean_name = name.replace(" ", "_") + ".eps"
-        print "PREPARING TO SAVE: " + clean_name
-
-        # 1. Force the virtual screen to process all drawing commands
-        win.update_idletasks()
-        win.update()
-        time.sleep(1) # Wait 1 second to ensure Xvfb catches up
-
-        # 2. Find the exact size of the drawing (Bounding Box)
-        #    This prevents saving a 'blank' view
-        bbox = graph.canvas.canvas.bbox("all")
-        if not bbox:
-            print "ERROR: Canvas appears empty. Nothing to save."
-        else:
-            # bbox is (x, y, width, height)
-            x, y, w, h = bbox
-            # Add a small margin
-            width = w - x + 10
-            height = h - y + 10
-            
-            # 3. Save exactly that area
-            graph.canvas.canvas.postscript(file=clean_name, colormode='color', 
-                                         x=x, y=y, width=width, height=height)
-            print "SUCCESS: Saved populated EPS file."
-
-    # win.mainloop() # Keep this commented out
-    # --- FIX ENDS HERE ---
+        canvasvg.saveall(name+".svg", graph.canvas.canvas)
+    win.mainloop()
 
 def show_plots(filenames, window_name, window_width, window_height, save, start_time, end_time):
     """Takes a list of filenames, and generates one plot per scenario found in
@@ -1227,13 +1198,11 @@ def show_plots(filenames, window_name, window_width, window_height, save, start_
     # Plot the scenarios
     for scenario in scenarios:
         plot_scenario(scenarios[scenario], scenario, window_name, window_width,
-                      window_height, save, start_time, end_time)  
+                      window_height, save, start_time, end_time)
 
 if __name__ == "__main__":
     args = {}
     parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--directory",
-        help="Path prefix of result JSON files.", default='./results')
     parser.add_argument("-t", "--title",
         help="Title of the display window.", default="Block Execution by SM")
     parser.add_argument("-v", "--height",
@@ -1244,19 +1213,25 @@ if __name__ == "__main__":
         help="What time to start plotting from.", default=0, type=float)
     parser.add_argument("-e", "--end",
         help="What time to end plotting at.", default=0, type=float)
+    parser.add_argument("result_file_to_plot", nargs="*", default=["./results"],
+        help="List of result files, or directories of result files, to plot (./results default)")
     if SAVE_AVIL:
         parser.add_argument("-o", "--output",
             help="Should plots be saved?", action="store_true")
-    # Legacy parser for old usage:
+    args = parser.parse_args()
+    filenames = []
+    # If a positional argument is a directory, it's automatically expanded out
+    # to include all contained *.json files. This supports the old usage:
     # `python view_blocksbysm.py [results directory (default: ./results)]`
-    if len(sys.argv) == 2 and sys.argv[1][0] != "-":
-        print("Warning: Unnamed arguments are deprecated! Run %s --help for information on new format."%(sys.argv[0]))
-        args = parser.parse_args([]) # Get defaults
-        args.directory = sys.argv[1]
-    else:
-        args = parser.parse_args()
-    filenames = glob.glob(args.directory + "*.json")
+    for f in args.result_file_to_plot:
+        if os.path.isdir(f):
+            filenames.extend(glob.glob(f + "/*.json"))
+        elif os.path.isfile(f):
+            filenames.append(f)
+        else:
+            print("Input path '%s' not found as valid file or directory." % f, file=sys.stderr)
+            exit(1)
     if SAVE_AVIL:
         show_plots(filenames, args.title, args.width, args.height, args.output, args.start, args.end)
     else:
-        show_plots(filenames, args.title, args.width, args.height, True, args.start, args.end)
+        show_plots(filenames, args.title, args.width, args.height, False, args.start, args.end)

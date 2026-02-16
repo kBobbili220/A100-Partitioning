@@ -21,11 +21,22 @@ To cite this work in academic use, either link to this repository or cite the
 }
 ```
 
+If using SM/TPC partitioning, please cite the
+[paper for which it was created](https://cs.unc.edu/~jbakita/rtas23.pdf).
+```
+@inproceedings{bakita2023hardware,
+  title={Hardware Compute Partitioning on {NVIDIA} {GPUs}},
+  author={Bakita, Joshua and Anderson, James H},
+  booktitle={Proceedings of the 29th IEEE Real-Time and Embedded Technology and Applications Symposium (RTAS)},
+  year={2023},
+}
+```
+
 For Users of AMD GPUs
 ---------------------
 
 For users of AMD GPUs, or those willing to give up some useful CUDA-specific
-features, more recent development has been focused on a port of this project to
+features, we developed a port of this project in
 the [HIP](https://github.com/ROCm-Developer-Tools/HIP) language. This project
 can be found at [https://github.com/yalue/hip_plugin_framework](https://github.com/yalue/hip_plugin_framework).
 `hip_plugin_framework` remains nearly identical to `cuda_scheduling_examiner`,
@@ -47,6 +58,10 @@ or CUDA versions 8.0 or earlier, is available by checking out the `older_cuda`
 git tag.
 
 To build, clone the repository, `cd` into it, and run `make`.
+
+In order to use SM/TPC partitioning (the `sm_mask` field documented below),
+please install [libsmctrl](http://rtsrv.cs.unc.edu/cgit/cgit.cgi/libsmctrl.git/)
+and set `LIBSMCTRL_PATH` to the library's location in this project's Makefile.
 
 Usage
 -----
@@ -78,6 +93,15 @@ python scripts/view_timelines.py
 
 # View the execution timeline of each block
 python scripts/view_blocksbysm.py
+```
+
+To only plot a subset of the results, many of the aforementioned scripts support
+explicitly specifying which output files to plot.
+For example:
+
+```bash
+# Plot all results of the memset_doesnt_block.json configuration
+python scripts/view_blocksbysm.py ./results/test_blocking_memset*
 ```
 
 Configuration Files
@@ -120,7 +144,7 @@ The layout of each configuration file is as follows:
         particular benchmark. If not provided, this benchmark's log will be
         given a default name based on its filename, process and thread ID. If
         this doesn't start with '/', it will be relative to
-        base_result_directory.>,
+        base_result_directory. To discard log, use '/dev/null'.>,
       "mps_thread_percentage": <Number. Optional. A percentage of thread
         resources to use if MPS is active and a Volta-architecture GPU is used.
         This is ignored if use_processes is false. Defaults to 100.>,
@@ -135,11 +159,11 @@ The layout of each configuration file is as follows:
         with up to 3 integers, specifying a multi-dimensional grid size.>,
       "data_size": <Number. Required, but may be ignored. The input size, in
         bytes, for the benchmark.>,
-      "sm_mask": <Hexidecimal mask. Optional. Which TPCs this benchmark will
-        not be permitted to run on. A bit set at index i indicates that TPC i
-        should be disabled for this benchmark. May be prefixed with ~ to
-        indicate that the mask should be inverted before application. Requires
-        building with libsmctrl.
+      "sm_mask": <Hexidecimal mask. Optional. A set bit indicates a disabled
+        TPC at that index. May be prefixed with ~ to indicate that the mask
+        should be inverted before application (turning this into a bit string
+        of enabled, rather than disabled, TPCs). Requires building with
+        libsmctrl.>,
       "additional_info": <A JSON object of any format. Optional. This can be
         used to pass additional benchmark-specific configuration parameters.>,
       "max_iterations": <Number. Optional. If specified, overrides the default
@@ -147,6 +171,9 @@ The layout of each configuration file is as follows:
         provided for any benchmark, then sync_every_iteration must be false.>,
       "max_time": <Number. Optional. If specified, overrides the default
         max_time for this benchmark alone. 0 = unlimited.>,
+      "terminator": <Boolean. Optional, defaults to false. If true, after this
+        benchmark hits its max_time or max_iterations, all other benchmarks are
+        signaled to end upon completion of their current iteration.>
       "release_time": <Number. Optional. If set, this benchmark will sleep for
         the given number of seconds (between initialization and the start of
         the first iteration) before beginning execution.>,

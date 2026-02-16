@@ -15,6 +15,11 @@
 //     "thread_count": <number of threads per block for this kernel>,
 //     "delay": <number of seconds to sleep after the previous kernel, but
 //              before releasing this kernel. Defaults to 0.0.>,
+//     "sm_mask": <Hexidecimal mask. Optional. A set bit indicates a disabled
+//                TPC at that index. May be prefixed with ~ to indicate that
+//                the mask should be inverted before application (turning this
+//                into a bit string of enabled, rather than disabled, TPCs).
+//                Requires building with libsmctrl.>,
 //     "shared_memory_size": <# of shared 32-bit integers. Must be one of
 //                           0, 4096, 8192, or 10240. The shared memory
 //                           usage in bytes will be one of those values
@@ -276,9 +281,11 @@ static int InitializeKernelConfigs(BenchmarkState *state, char *info) {
     }
     entry = cJSON_GetObjectItem(list_entry, "sm_mask");
 #ifdef SMCTRL
-    if (!entry || (entry->type != cJSON_String)) {
-      kernel_configs[i].sm_mask = 0; // Enable all
-    } else {
+    if (entry) {
+      if (entry->type != cJSON_String) {
+        printf("Invalid benchmark sm_mask for multikernel.so.\n");
+        goto ErrorCleanup;
+      }
       // Support an enable mask via invert prefix
       if (entry->valuestring[0] == '~') {
           kernel_configs[i].sm_mask = strtoull(entry->valuestring + 1, NULL, 16);
@@ -286,10 +293,13 @@ static int InitializeKernelConfigs(BenchmarkState *state, char *info) {
       } else {
           kernel_configs[i].sm_mask = strtoull(entry->valuestring, NULL, 16);
       }
+    } else {
+      kernel_configs[i].sm_mask = 0; // Enable all TPCs by default
     }
 #else
+    // libsmctrl build needs to be enabled in the Makefile to use this field
     if (entry) {
-      printf("libsmctrl required for sm_mask in multikernel.so.\n");
+      printf("libsmctrl required for sm_mask in multikernel.so; see README.md.\n");
       goto ErrorCleanup;
     }
 #endif

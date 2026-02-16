@@ -39,64 +39,49 @@ static double CurrentSeconds(void) {
   return ((double) ts.tv_sec) + (((double) ts.tv_nsec) / 1e9);
 }
 
-#if __CUDA_ARCH__ >= 300
+// GlobalTimer64: Get 64-bit counter of current time on GPU
+// ***This is duplicated in benchmark_gpu_utilities.h***
+#if __CUDA_ARCH__ >= 300 // Kepler+
+// Returns the value of CUDA's global nanosecond timer.
 // Starting with sm_30, `globaltimer64` was added
-// Compiles to 5 inline SASS instructions on sm_52
+// Tuned for sm_5X architectures, but tested to still be efficient on sm_7X
 static __device__ inline uint64_t GlobalTimer64(void) {
   uint32_t lo_bits, hi_bits, hi_bits_2;
   uint64_t ret;
-  // Upper bits may rollever between our 1st and 2nd read
+  // Upper bits may rollover between our 1st and 2nd read
+  // (The bug seems constrained to certain old Jetson boards, so this
+  // workaround could probably be gated to only those GPUs.)
   asm volatile("mov.u32 %0, %%globaltimer_hi;" : "=r"(hi_bits));
   asm volatile("mov.u32 %0, %%globaltimer_lo;" : "=r"(lo_bits));
   asm volatile("mov.u32 %0, %%globaltimer_hi;" : "=r"(hi_bits_2));
   // If upper bits rolled over, lo_bits = 0
   lo_bits = (hi_bits != hi_bits_2) ? 0 : lo_bits;
-  // As sm_52 SASS is naively 32-bit, the following ops get optimized out
+  // SASS on older architectures (such as sm_52) is natively 32-bit, so the
+  // following three lines get optimized out.
   ret = hi_bits_2;
   ret <<= 32;
   ret |= lo_bits;
   return ret;
 }
-#elif __CUDA_ARCH__ < 200
+#elif __CUDA_ARCH__ < 200 // Tesla
+// On sm_13, we /only/ have `clock` (32 bits)
 static __device__ inline uint64_t GlobalTimer64(void) {
-    uint32_t lo_bits;
-    uint64_t ret;
-    // On sm_13, we /only/ have `clock` (32 bits)
-    asm volatile("mov.u32 %0, %%clock;" : "=r"(lo_bits));
-    ret = 0;
-    ret |= lo_bits;
-    return ret;
+  uint32_t lo_bits;
+  uint64_t ret;
+  asm volatile("mov.u32 %0, %%clock;" : "=r"(lo_bits));
+  ret = 0;
+  ret |= lo_bits;
+  return ret;
 }
 #else
-#error Unsupported architecture!
+// Could use clock64 for sm_2x (Fermi), but that's untested
+#error Fermi-based GPUs (sm_2x) are unsupported!
 #endif
-
-
-/*
-// Returns the value of CUDA's global nanosecond timer.
-static __device__ inline uint64_t GlobalTimer64(void) {
-  // Due to a bug in CUDA's 64-bit globaltimer, the lower 32 bits can wrap
-  // around after the upper bits have already been read. Work around this by
-  // reading the high bits a second time. Use the second value to detect a
-  // rollover, and set the lower bits of the 64-bit "timer reading" to 0, which
-  // would be valid, it's passed over during the duration of the reading. If no
-  // rollover occurred, just return the initial reading.
-  volatile uint64_t first_reading;
-  volatile uint32_t second_reading;
-  uint32_t high_bits_first;
-  asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(first_reading));
-  high_bits_first = first_reading >> 32;
-  asm volatile("mov.u32 %0, %%globaltimer_hi;" : "=r"(second_reading));
-  if (high_bits_first == second_reading) {
-    return first_reading;
-  }
-  // Return the value with the updated high bits, but the low bits set to 0.
-  return ((uint64_t) second_reading) << 32;
-}*/
 
 // A simple kernel which writes the value of the globaltimer64 register to a
 // location in device memory.
-static __global__ void GetTime(uint64_t *time, volatile uint32_t *ready_barrier, volatile uint32_t *start_barrier, volatile uint32_t *end_barrier) {
+static __global__ void GetTime(uint64_t *time, volatile uint32_t *ready_barrier,
+    volatile uint32_t *start_barrier, volatile uint32_t *end_barrier) {
   *ready_barrier = 1;
   while (!*start_barrier)
     continue;
@@ -121,8 +106,7 @@ static void FreeSharedBuffer(void *buffer, size_t size) {
 }
 
 // This function should be run in a separate process in order to read the GPU's
-// nanosecond counter. Returns 0 on error.
-// TODO: Cleanup allocations if something goes bad
+// nanosecond counter. Sets times to 0 on error.
 static void InternalReadGPUNanoseconds(int cuda_device, double *cpu_time,
     uint64_t *gpu_time) {
   uint64_t *device_time = NULL;
@@ -130,40 +114,83 @@ static void InternalReadGPUNanoseconds(int cuda_device, double *cpu_time,
   volatile uint32_t *gpu_end_barrier, *end_barrier = NULL;
   volatile uint32_t *gpu_ready_barrier, *ready_barrier = NULL;
   volatile double cpu_start, cpu_end;
+  double max_error;
+  // Times need to be zero in case any of the following logic fails
+  *cpu_time = 0;
+  *gpu_time = 0;
   if (!CheckCUDAError(cudaSetDevice(cuda_device))) return;
   if (!CheckCUDAError(cudaMalloc(&device_time, sizeof(*device_time)))) return;
-  if (!CheckCUDAError(cudaHostAlloc(&start_barrier, sizeof(*start_barrier), cudaHostAllocMapped))) return;
-  if (!CheckCUDAError(cudaHostAlloc(&end_barrier, sizeof(*end_barrier), cudaHostAllocMapped))) return;
-  if (!CheckCUDAError(cudaHostAlloc(&ready_barrier, sizeof(*ready_barrier), cudaHostAllocMapped))) return;
+  if (!CheckCUDAError(cudaHostAlloc(&start_barrier, sizeof(*start_barrier),
+    cudaHostAllocMapped))) goto out;
+  if (!CheckCUDAError(cudaHostAlloc(&end_barrier, sizeof(*end_barrier),
+    cudaHostAllocMapped))) goto out;
+  if (!CheckCUDAError(cudaHostAlloc(&ready_barrier, sizeof(*ready_barrier),
+    cudaHostAllocMapped))) goto out;
   // Setup device pointers for all the barriers
-  if (!CheckCUDAError(cudaHostGetDevicePointer((uint32_t**)&gpu_start_barrier, (uint32_t*)start_barrier, 0))) return;
-  if (!CheckCUDAError(cudaHostGetDevicePointer((uint32_t**)&gpu_end_barrier, (uint32_t*)end_barrier, 0))) return;
-  if (!CheckCUDAError(cudaHostGetDevicePointer((uint32_t**)&gpu_ready_barrier, (uint32_t*)ready_barrier, 0))) return;
+  if (!CheckCUDAError(cudaHostGetDevicePointer((uint32_t**)&gpu_start_barrier,
+    (uint32_t*)start_barrier, 0))) goto out;
+  if (!CheckCUDAError(cudaHostGetDevicePointer((uint32_t**)&gpu_end_barrier,
+    (uint32_t*)end_barrier, 0))) goto out;
+  if (!CheckCUDAError(cudaHostGetDevicePointer((uint32_t**)&gpu_ready_barrier,
+    (uint32_t*)ready_barrier, 0))) goto out;
+  /* Clock Synchronization Flow
+
+                            Start Barrier--+
+                                           |
+    CPU: Launch Kernel......^-->CPU TS 1-->|............^-->CPU TS 2-->Done
+                |           |              |            |
+    GPU:        +---------->|..............v-->GPU TS-->|-->Terminate
+                            |                           |
+             Ready Barrier--+              End Barrier--+
+
+    GPU TS ~= CPU TS 1 + (CPU TS 2 - CPU TS 1) / 2.0
+
+    If it takes about as long for a CPU memory write to DRAM to be visible to
+    the GPU as it takes for a GPU memory write to DRAM to be visible to the
+    CPU.
+
+    If not, the worst possible error is if one of the above legs is instant,
+    and the other is extremely slow, in which case the time estimate is off by
+    as much as half the CPU interval [(CPU TS 2 - CPU TS 1) / 2.0]. (Depending
+    on the platform's CPU cache configuration, an inbalance may be expected.)
+
+    The typical error should be about the difference in the amount of time it
+    takes to read the CPU TS counter and the GPU TS counter. On recent
+    platforms, the difference shouldn't be more than double-digit nanoseconds.
+  */
   // Run the kernel a first time to warm up the GPU.
-  GetTime<<<1, 1>>>(device_time, gpu_ready_barrier, gpu_start_barrier, gpu_end_barrier);
+  GetTime<<<1, 1>>>(device_time, gpu_ready_barrier, gpu_start_barrier,
+    gpu_end_barrier);
   *start_barrier = 1;
-  if (!CheckCUDAError(cudaDeviceSynchronize())) return;
+  if (!CheckCUDAError(cudaDeviceSynchronize())) goto out;
   // Now run the actual time-checking kernel.
   *start_barrier = 0;
   *end_barrier = 0;
   *ready_barrier = 0;
-  GetTime<<<1, 1>>>(device_time, gpu_ready_barrier, gpu_start_barrier, gpu_end_barrier);
+  GetTime<<<1, 1>>>(device_time, gpu_ready_barrier, gpu_start_barrier,
+    gpu_end_barrier);
+  // Wait for kernel to initialize
   while (!*ready_barrier)
     continue;
-  *start_barrier = 1;
+  // Immediately record CPU time and tell GPU kernel to record time
   cpu_start = CurrentSeconds();
+  *start_barrier = 1;
+  // Wait for kernel to finish recording time, and immediately record CPU time again
   while (!*end_barrier)
     continue;
   cpu_end = CurrentSeconds();
-  volatile double cpu_end2 = CurrentSeconds();
-  if (!CheckCUDAError(cudaMemcpy(gpu_time, device_time, sizeof(device_time), cudaMemcpyDeviceToHost))) return;
+  // GPU clock should have been stored about half-way between the CPU reads
   *cpu_time = (cpu_end - cpu_start) / 2.0 + cpu_start;
-  double max_error = (cpu_end - cpu_start) / 2.0;
-  fprintf(stderr, "max_error: %f us (error floor of %f us)\n", max_error * (1000.0 * 1000.0), (cpu_end2 - cpu_end) / 2.0 * (1000.0*1000.0));
-  cudaFree((void*)device_time);
-  cudaFree((void*)ready_barrier);
+  if (!CheckCUDAError(cudaMemcpy(gpu_time, device_time, sizeof(device_time),
+    cudaMemcpyDeviceToHost))) goto out;
+  max_error = (cpu_end - cpu_start) / 2.0;
+  fprintf(stderr, "Time synchronized to a maximum error of +/- %f us.\n",
+    max_error * (1000.0 * 1000.0));
+out:
+  cudaFree(device_time);
   cudaFree((void*)start_barrier);
   cudaFree((void*)end_barrier);
+  cudaFree((void*)ready_barrier);
 }
 
 int GetHostDeviceTimeOffset(int cuda_device, double *host_seconds,
@@ -262,22 +289,22 @@ int GetMaxResidentThreads(int cuda_device) {
   return to_return;
 }
 
-#if __CUDA_ARCH__ >= 300
-// Starting with sm_30, `globaltimer64` was added
+#if __CUDA_ARCH__ >= 300 // Kepler+
 static __global__ void TimerSpin(uint64_t ns_to_spin) {
   uint64_t start_time = GlobalTimer64();
   while ((GlobalTimer64() - start_time) < ns_to_spin) {
     continue;
   }
 }
-#elif __CUDA_ARCH__ < 200
+#elif __CUDA_ARCH__ < 200 // Tesla
 // On sm_13, we /only/ have `clock` (32 bits)
 static __device__ inline uint32_t Clock32(void) {
-    uint32_t lo_bits;
-    asm volatile("mov.u32 %0, %%clock;" : "=r"(lo_bits));
-    return lo_bits;
+  uint32_t lo_bits;
+  asm volatile("mov.u32 %0, %%clock;" : "=r"(lo_bits));
+  return lo_bits;
 }
 
+// 'clock' can easily roll over, so handle that for ancient architectures
 static __global__ void TimerSpin(uint64_t ns_to_spin) {
   uint64_t total_time = 0;
   uint32_t last_time = Clock32();
@@ -286,7 +313,7 @@ static __global__ void TimerSpin(uint64_t ns_to_spin) {
     if (time < last_time) {
       // Rollover. Compensate...
       total_time += time; // rollover to now
-      total_time += UINT_MAX - last_time;// last to rollover
+      total_time += UINT_MAX - last_time; // last to rollover
     } else {
       // Step counter
       total_time += time - last_time;
@@ -295,11 +322,12 @@ static __global__ void TimerSpin(uint64_t ns_to_spin) {
   }
 }
 #else
-#error Unsupported architecture!
+// Could use clock64 for sm_2x (Fermi), but that's untested
+#error Fermi-based GPUs (sm_2x) are unsupported!
 #endif
 
 // This function is intended to be run in a child process. Returns -1 on error.
-double InternalGetGPUTimerScale(int cuda_device) {
+static double InternalGetGPUTimerScale(int cuda_device) {
   struct timespec start, end;
   uint64_t nanoseconds_elapsed;
   if (!CheckCUDAError(cudaSetDevice(cuda_device))) return -1;
@@ -319,7 +347,6 @@ double InternalGetGPUTimerScale(int cuda_device) {
   }
   nanoseconds_elapsed = end.tv_sec * 1e9 + end.tv_nsec;
   nanoseconds_elapsed -= start.tv_sec * 1e9 + start.tv_nsec;
-  printf("%ldns elapsed\n", nanoseconds_elapsed);
   return ((double) nanoseconds_elapsed) / ((double) TIMER_SPIN_DURATION);
 }
 
