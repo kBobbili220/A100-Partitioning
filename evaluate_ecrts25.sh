@@ -94,10 +94,12 @@ if [ ! -e /proc/gpu0 ]; then
   sudo insmod nvdebug/nvdebug.ko
 fi
 
+# Set the GPU ID to use (default: 0, can be overridden via environment)
+GPU_ID="${GPU_ID:-0}"
 # Run everything on the first GPU by PCIe ID
 # (changing this may not be sufficient to run on another GPU; `libsmctrl_test_gpc_info` and `test_granularity.py` assume use of GPU 0)
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=$GPU_ID
 
 # Mitigate the MPS issue with not creating enough channels
 export CUDA_DEVICE_MAX_CONNECTIONS=8
@@ -116,7 +118,7 @@ gpcs_to_mask() {
   MASK_X=0
   for num in ${GPCS[@]}; do
    idx=$(( $num + 2 ))
-   mask=$(./libsmctrl/libsmctrl_test_gpc_info | head -$idx | tail -1 | cut -d " " -f 10)
+   mask=$(./libsmctrl/libsmctrl_test_gpc_info "$GPU_ID" | head -$idx | tail -1 | cut -d " " -f 10)
    MASK_X=$(( $MASK_X | $mask ))
   done
   printf "0x%016llx" $MASK_X
@@ -170,7 +172,13 @@ cd ..
 eval_mps() {
 ## MPS (overhead, granularity, and enforcement)
 echo -e "\e[4m\e[1m***** Evaluating MPS *****\e[0m"
+# Ensure CUDA_VISIBLE_DEVICES is set before starting MPS (MPS reads it at startup)
+export CUDA_VISIBLE_DEVICES=$GPU_ID
+# Start MPS with the selected GPU
 nvidia-cuda-mps-control -d
+# After MPS starts, unset CUDA_VISIBLE_DEVICES - MPS manages device access now
+unset CUDA_VISIBLE_DEVICES
+nvidia-smi -L
 ./gpu-microbench/constant_cycles_kernel 1 # To warm up MPS
 
 cd gpu-microbench
@@ -201,12 +209,15 @@ fi
 cd ..
 
 echo "quit" | nvidia-cuda-mps-control
+# Restore CUDA_VISIBLE_DEVICES after MPS stops (for non-MPS experiments)
+export CUDA_VISIBLE_DEVICES=$GPU_ID
 }
 
 eval_libsmctrl() {
 ## libsmctrl/nvtaskset ("nvsplit") (overhead and enforcement) (granularity included in above)
 echo -e "\e[4m\e[1m***** Evaluating libsmctrl/nvtaskset *****\e[0m"
 nvidia-cuda-mps-control -d
+unset CUDA_VISIBLE_DEVICES
 ./gpu-microbench/constant_cycles_kernel 1 # To warm up MPS
 
 cd gpu-microbench
@@ -303,7 +314,7 @@ if [ $GRANULARITY_SAMPLES -gt 0 ]; then
   sudo nvidia-smi mig -dgi
   # Run granularity experiments
   # The TPC count has to be manually specified, since test_granularity.py cannot determine the hardware TPC count while MiG is in use
-  python3 ./scripts/test_granularity.py --mig --tpc_count 54 --iterations $GRANULARITY_SAMPLES # Auto-detects and adjusts for platform
+  python3 ./scripts/test_granularity.py --mig --device 0 --tpc_count 54 --iterations $GRANULARITY_SAMPLES # Auto-detects and adjusts for platform
   sudo nvidia-smi mig -dci
   sudo nvidia-smi mig -dgi
 fi
