@@ -76,7 +76,7 @@ void libsmctrl_get_gpc_info_ext_easy(uint32_t* num_gpcs, uint128_t** masks, int 
 	// (Redirect stderr while doing this to mute libsmctrl error messages)
 	if ((dev_null_fd = open("/dev/null", O_WRONLY)) == -1)
 		error(1, errno, "Unable to open /dev/null");
-	if (old_stderr = dup(STDERR_FILENO) == -1)
+	if ((old_stderr = dup(STDERR_FILENO)) == -1)
 		error(1, errno, "Unable to duplicate stderr file descriptor");
 	if (dup2(dev_null_fd, STDERR_FILENO) == -1)
 		error(1, errno, "Unable to overwrite stderr file descriptor");
