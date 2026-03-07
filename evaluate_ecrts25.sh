@@ -83,19 +83,20 @@ fi
 # Terminate MPS if it was left running by an earlier, interrupted run
 echo "quit" | nvidia-cuda-mps-control 2> /dev/null
 
+# Set the GPU ID to use (default: 0, can be overridden via environment)
+GPU_ID="${GPU_ID:-0}"
+
 # Check that the GPU is idle
-if [ $(nvidia-smi -i 0 --query-compute-apps=pid --format=csv | wc -l) -ne 1 ]; then
-  echo "GPU0 does not appear to be idle. Please see nvidia-smi and terminate any applications it lists as using GPU0."
+if [ $(nvidia-smi -i $GPU_ID --query-compute-apps=pid --format=csv | wc -l) -ne 1 ]; then
+  echo "GPU$GPU_ID does not appear to be idle. Please see nvidia-smi and terminate any applications it lists as using GPU$GPU_ID."
   exit 1
 fi
 
 # Verify that nvdebug is still loaded
-if [ ! -e /proc/gpu0 ]; then
+if [ ! -e /proc/gpu$GPU_ID ]; then
   sudo insmod nvdebug/nvdebug.ko
 fi
 
-# Set the GPU ID to use (default: 0, can be overridden via environment)
-GPU_ID="${GPU_ID:-0}"
 # Run everything on the first GPU by PCIe ID
 # (changing this may not be sufficient to run on another GPU; `libsmctrl_test_gpc_info` and `test_granularity.py` assume use of GPU 0)
 export CUDA_DEVICE_ORDER=PCI_BUS_ID

@@ -49,7 +49,8 @@ def plot_startup():
 	plt.xlabel("Partitioning Mechanism")
 	plt.ylabel("Maximum Startup Overhead (s)")
 	plt.tight_layout()
-	plt.show()
+	#plt.show()
+	plt.savefig("startup_oh.png")
 
 def plot_launch():
 	# Plot launch overheads
@@ -65,7 +66,8 @@ def plot_launch():
 	plt.xlabel("Partitioning Mechanism")
 	plt.ylabel("Launch Overhead (µs)")
 	plt.tight_layout()
-	plt.show()
+	#plt.show()
+	plt.savefig("launch_oh.png")
 
 def plot_granularity():
 	# Plot granularity
@@ -107,7 +109,8 @@ def plot_enforcement():
 	plt.grid()
 
 	plt.tight_layout()
-	plt.show()
+	#plt.show()
+	plt.savefig("enforcement_rw.png")
 
 	i_mb_none = load_stripped_cse("ecrts25_isol_none_mb_stripped.json")
 	i_mb_libsmctrl = load_stripped_cse("ecrts25_isol_libsmctrl_mb_stripped.json")
@@ -134,7 +137,8 @@ def plot_enforcement():
 	plt.grid()
 
 	plt.tight_layout()
-	plt.show()
+	#plt.show()
+	plt.savefig("enforcement_mb.png")
 
 if len(sys.argv) > 1:
 	if sys.argv[1] == "startup_oh":
