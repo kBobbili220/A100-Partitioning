@@ -61,6 +61,16 @@ tests: libsmctrl_test_gpc_info libsmctrl_test_supreme_mask \
        libsmctrl_test_stream_mask_override libsmctrl_test_next_mask \
        libsmctrl_test_next_mask_override
 
+# ----- Dynamic switching demo -----
+DYNAMIC_SWITCH_DIR := ../tests/dynamic_switch
+libsmctrl_dynamic_switch_demo: $(DYNAMIC_SWITCH_DIR)/libsmctrl_dynamic_switch_demo.cu libsmctrl.a
+	$(NVCC) -ccbin $(CXX) $< -o $(DYNAMIC_SWITCH_DIR)/$@ -g -L. -l:libsmctrl.a $(LDFLAGS)
+
+# ----- Parallel partitioning demo -----
+PARALLEL_PARTITION_DIR := ../tests/parallel_partitioning
+libsmctrl_dual_tpc_gemm_demo: $(PARALLEL_PARTITION_DIR)/libsmctrl_dual_tpc_gemm_demo.cu libsmctrl.a
+	$(NVCC) -ccbin $(CXX) $< -o $(PARALLEL_PARTITION_DIR)/$@ -g -I. -L. -l:libsmctrl.a $(LDFLAGS)
+
 all: libsmctrl.so libcuda.so.1 nvtaskset tests
 
 clean:
@@ -69,7 +79,8 @@ clean:
 	      libsmctrl_test_global_mask \
 	      libsmctrl_test_stream_mask libsmctrl_test_stream_mask_override \
 	      libsmctrl_test_next_mask libsmctrl_test_next_mask_override \
-	      nvtaskset libcuda.so.1
+	      nvtaskset libcuda.so.1 $(DYNAMIC_SWITCH_DIR)/libsmctrl_dynamic_switch_demo \
+	      $(PARALLEL_PARTITION_DIR)/libsmctrl_dual_tpc_gemm_demo
 
 # On L4T (Linux4Tegra), the paths are different, and there may be multiple copies of libcuda.so.1
 install: libcuda.so.1

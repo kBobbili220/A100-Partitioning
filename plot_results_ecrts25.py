@@ -7,6 +7,10 @@ import os
 import sys
 
 PCT_A=57
+RESULTS_DIR="ecrts25_outputs"
+
+def results_path(filename):
+    return os.path.join(RESULTS_DIR, filename)
 
 # Setting plt.rcParams MUST be in a different cell than the imports, or it won't apply
 plt.rcParams["figure.figsize"] = (16,6)
@@ -35,13 +39,13 @@ def stats(arr):
 
 def plot_startup():
 	# Plot startup overheads
-	base = np.loadtxt("startup_oh_baseline.log")/(1000*1000)
-	mps  = np.loadtxt("startup_oh_mps.log")/(1000*1000)
-	libsmctrl_wrapper = np.loadtxt("startup_oh_libsmctrl-wrapper.log")/(1000*1000)
-	libsmctrl = np.loadtxt("startup_oh_libsmctrl.log")/(1000*1000)
-	nvtaskset_gpc = np.loadtxt("startup_oh_nvtaskset-gpc.log")/(1000*1000)
-	nvtaskset = np.loadtxt("startup_oh_nvtaskset.log")/(1000*1000)
-	mig  = np.loadtxt("startup_oh_mig.log")/(1000*1000)
+	base = np.loadtxt(results_path("startup_oh_baseline.log"))/(1000*1000)
+	mps  = np.loadtxt(results_path("startup_oh_mps.log"))/(1000*1000)
+	libsmctrl_wrapper = np.loadtxt(results_path("startup_oh_libsmctrl-wrapper.log"))/(1000*1000)
+	libsmctrl = np.loadtxt(results_path("startup_oh_libsmctrl.log"))/(1000*1000)
+	nvtaskset_gpc = np.loadtxt(results_path("startup_oh_nvtaskset-gpc.log"))/(1000*1000)
+	nvtaskset = np.loadtxt(results_path("startup_oh_nvtaskset.log"))/(1000*1000)
+	mig  = np.loadtxt(results_path("startup_oh_mig.log"))/(1000*1000)
 
 	plt.figure(figsize=(3.0,2.4))
 	plt.bar(np.arange(7), [max(base)/1000, max(mig)/1000, max(mps)/1000, max(libsmctrl_wrapper)/1000, max(libsmctrl)/1000, max(nvtaskset_gpc)/1000, max(nvtaskset)/1000], color=["0.7", green, orange, "0.5", blue, "0.5", "0.5"])
@@ -54,10 +58,10 @@ def plot_startup():
 
 def plot_launch():
 	# Plot launch overheads
-	base = np.loadtxt("launch_oh_baseline.log")/(1000)
-	mps  = np.loadtxt("launch_oh_mps.log")/(1000)
-	libsmctrl = np.loadtxt("launch_oh_libsmctrl.log")/(1000)
-	mig  = np.loadtxt("launch_oh_mig.log")/(1000)
+	base = np.loadtxt(results_path("launch_oh_baseline.log"))/(1000)
+	mps  = np.loadtxt(results_path("launch_oh_mps.log"))/(1000)
+	libsmctrl = np.loadtxt(results_path("launch_oh_libsmctrl.log"))/(1000)
+	mig  = np.loadtxt(results_path("launch_oh_mig.log"))/(1000)
 
 	plt.figure(figsize=(1.75,2.4))
 	data = (base, mig, mps, libsmctrl)
@@ -84,11 +88,11 @@ def plot_enforcement():
 		with open(file) as fp:
 			return np.array(json.load(fp))
 
-	i_baseline = load_stripped_cse("ecrts25_isol_baseline_stripped.json")
-	i_none = load_stripped_cse("ecrts25_isol_none_rw_stripped.json")
-	i_libsmctrl = load_stripped_cse("ecrts25_isol_libsmctrl_rw_stripped.json")
-	i_mps = load_stripped_cse("ecrts25_isol_mps_rw_stripped.json")
-	i_mig = load_stripped_cse("ecrts25_isol_mig_rw_stripped.json")
+	i_baseline = load_stripped_cse(results_path("ecrts25_isol_baseline_stripped.json"))
+	i_none = load_stripped_cse(results_path("ecrts25_isol_none_rw_stripped.json"))
+	i_libsmctrl = load_stripped_cse(results_path("ecrts25_isol_libsmctrl_rw_stripped.json"))
+	i_mps = load_stripped_cse(results_path("ecrts25_isol_mps_rw_stripped.json"))
+	i_mig = load_stripped_cse(results_path("ecrts25_isol_mig_rw_stripped.json"))
 
 	plt.figure(figsize=(2.75,2.4)) # One-half LIPIcs
 
@@ -112,10 +116,10 @@ def plot_enforcement():
 	#plt.show()
 	plt.savefig("enforcement_rw.png")
 
-	i_mb_none = load_stripped_cse("ecrts25_isol_none_mb_stripped.json")
-	i_mb_libsmctrl = load_stripped_cse("ecrts25_isol_libsmctrl_mb_stripped.json")
-	i_mb_mps = load_stripped_cse("ecrts25_isol_mps_mb_stripped.json")
-	i_mb_mig = load_stripped_cse("ecrts25_isol_mig_mb_stripped.json")
+	i_mb_none = load_stripped_cse(results_path("ecrts25_isol_none_mb_stripped.json"))
+	i_mb_libsmctrl = load_stripped_cse(results_path("ecrts25_isol_libsmctrl_mb_stripped.json"))
+	i_mb_mps = load_stripped_cse(results_path("ecrts25_isol_mps_mb_stripped.json"))
+	i_mb_mig = load_stripped_cse(results_path("ecrts25_isol_mig_mb_stripped.json"))
 
 	plt.figure(figsize=(2.75,2.4)) # One-half LIPIcs
 

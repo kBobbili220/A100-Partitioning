@@ -112,6 +112,8 @@ export PYTHONPATH=$PYTHONPATH:$(pwd)/libsmctrl
 
 # Not strictly necessary, but makes MPS stop incessently warning about it not being able to log to /var/log/nvidia-mps
 export CUDA_MPS_LOG_DIRECTORY=/tmp
+RESULTS_DIR=ecrts25_outputs
+mkdir -p "$RESULTS_DIR"
 
 # Use libsmctrl_test_gpc_info to derive the SM masks that correspond to the above GPC settings
 gpcs_to_mask() {
@@ -136,7 +138,7 @@ fi
 # Helper function for cleaning up the output from cuda_scheduling_examiner
 # Takes one argument: the file name (without .json)
 strip_and_copy() {
-  cat ./results/$1.json | jq "[.times[].execute_times | select(. != null) | (.[1] - .[0]) * 1000]" > ../$1_stripped.json
+  cat ./results/$1.json | jq "[.times[].execute_times | select(. != null) | (.[1] - .[0]) * 1000]" > ../$RESULTS_DIR/$1_stripped.json
 }
 
 eval_baseline() {
@@ -147,11 +149,11 @@ if [ $STARTUP_OH_SAMPLES -gt 0 ]; then
   # Run benchmark once in a "warmup" round to pull relevant binaries into the page cache
   LD_LIBRARY_PATH="" ./measure_startup_oh > /dev/null 2>&1
   for (( i=0; i<$STARTUP_OH_SAMPLES; i+=1 )); do
-    LD_LIBRARY_PATH="" ./measure_startup_oh 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../startup_oh_baseline.log;
+    LD_LIBRARY_PATH="" ./measure_startup_oh 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../$RESULTS_DIR/startup_oh_baseline.log;
   done
 fi
 if [ $LAUNCH_OH_SAMPLES -gt 0 ]; then
-  taskset -c 5 ./measure_launch_oh $LAUNCH_OH_SAMPLES >> ../launch_oh_baseline.log
+  taskset -c 5 ./measure_launch_oh $LAUNCH_OH_SAMPLES >> ../$RESULTS_DIR/launch_oh_baseline.log
 fi
 cd ..
 cd cuda_scheduling_examiner_mirror
@@ -187,11 +189,11 @@ if [ $STARTUP_OH_SAMPLES -gt 0 ]; then
   # Run benchmark once in a "warmup" round to pull relevant binaries into the page cache
   LD_LIBRARY_PATH="" CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$PCT_A ./measure_startup_oh > /dev/null 2>&1
   for (( i=0; i<$STARTUP_OH_SAMPLES; i+=1 )); do
-    LD_LIBRARY_PATH="" CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$PCT_A ./measure_startup_oh 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../startup_oh_mps.log;
+    LD_LIBRARY_PATH="" CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$PCT_A ./measure_startup_oh 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../$RESULTS_DIR/startup_oh_mps.log;
   done
 fi
 if [ $LAUNCH_OH_SAMPLES -gt 0 ]; then
-  CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$PCT_A taskset -c 5 ./measure_launch_oh $LAUNCH_OH_SAMPLES >> ../launch_oh_mps.log
+  CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=$PCT_A taskset -c 5 ./measure_launch_oh $LAUNCH_OH_SAMPLES >> ../$RESULTS_DIR/launch_oh_mps.log
 fi
 cd ..
 cd cuda_scheduling_examiner_mirror
@@ -230,17 +232,17 @@ if [ $STARTUP_OH_SAMPLES -gt 0 ]; then
   ./measure_startup_oh ../libsmctrl/nvtaskset --gpc-list $GPCS_A ./measure_launch_oh 1 > /dev/null 2>&1
   for (( i=0; i<$STARTUP_OH_SAMPLES; i+=1 )); do
     # Just cost of loading the library
-    LD_LIBRARY_PATH="" ./measure_startup_oh -e LD_PRELOAD=../libsmctrl/libsmctrl.so 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../startup_oh_libsmctrl.log;
+    LD_LIBRARY_PATH="" ./measure_startup_oh -e LD_PRELOAD=../libsmctrl/libsmctrl.so 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../$RESULTS_DIR/startup_oh_libsmctrl.log;
     # Cost of libsmctrl-wrapper (assumes fake libsmctrl.so.1 is on LD_LIBRARY_PATH)
-    ./measure_startup_oh -e LIBSMCTRL_MASK=$MASK_A 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../startup_oh_libsmctrl-wrapper.log;
+    ./measure_startup_oh -e LIBSMCTRL_MASK=$MASK_A 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../$RESULTS_DIR/startup_oh_libsmctrl-wrapper.log;
     # nvtaskset without GPC lookup
-    ./measure_startup_oh ../libsmctrl/nvtaskset $MASK_A_ENABLE ./measure_launch_oh 1 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../startup_oh_nvtaskset.log;
+    ./measure_startup_oh ../libsmctrl/nvtaskset $MASK_A_ENABLE ./measure_launch_oh 1 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../$RESULTS_DIR/startup_oh_nvtaskset.log;
     # nvtaskset with GPC lookup
-    ./measure_startup_oh ../libsmctrl/nvtaskset --gpc-list $GPCS_A ./measure_launch_oh 1 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../startup_oh_nvtaskset-gpc.log;
+    ./measure_startup_oh ../libsmctrl/nvtaskset --gpc-list $GPCS_A ./measure_launch_oh 1 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../$RESULTS_DIR/startup_oh_nvtaskset-gpc.log;
   done
 fi
 if [ $LAUNCH_OH_SAMPLES -gt 0 ]; then
-  taskset -c 5 ../libsmctrl/nvtaskset --gpc-list $GPCS_A ./measure_launch_oh $LAUNCH_OH_SAMPLES >> ../launch_oh_libsmctrl.log
+  taskset -c 5 ../libsmctrl/nvtaskset --gpc-list $GPCS_A ./measure_launch_oh $LAUNCH_OH_SAMPLES >> ../$RESULTS_DIR/launch_oh_libsmctrl.log
 fi
 cd ..
 cd cuda_scheduling_examiner_mirror
@@ -273,11 +275,11 @@ if [ $STARTUP_OH_SAMPLES -gt 0 ]; then
   # Run benchmark once in a "warmup" round to pull relevant binaries into the page cache
   LD_LIBRARY_PATH="" ./measure_startup_oh > /dev/null 2>&1
   for (( i=0; i<$STARTUP_OH_SAMPLES; i+=1 )); do
-    LD_LIBRARY_PATH="" ./measure_startup_oh 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../startup_oh_mig.log;
+    LD_LIBRARY_PATH="" ./measure_startup_oh 2>&1 | cut -d "=" -s -f 2 | cut -d " " -f 2 | tr "\n" " " | sed 's/$/r - p/' | dc >> ../$RESULTS_DIR/startup_oh_mig.log;
   done
 fi
 if [ $LAUNCH_OH_SAMPLES -gt 0 ]; then
-  taskset -c 5 ./measure_launch_oh $LAUNCH_OH_SAMPLES >> ../launch_oh_mig.log
+  taskset -c 5 ./measure_launch_oh $LAUNCH_OH_SAMPLES >> ../$RESULTS_DIR/launch_oh_mig.log
 fi
 cd ..
 # Set up the 43% partition for competing work, get its UUID, and initialize MPS on it
