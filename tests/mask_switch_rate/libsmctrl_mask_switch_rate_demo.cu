@@ -20,13 +20,11 @@
 // scheduling. The knobs here intentionally separate:
 // - schedule shape (`tpcs_spec`)
 // - number of measured switch attempts (`iters`)
-// - kernel footprint (`blocks`)
 // - warmup stabilization (`warmup`)
 // - output naming (`csv_prefix`)
 struct Config {
   std::string tpcs_spec;
   int iters = 200;
-  int blocks = 4096;
   int warmup = 20;
   std::string csv_prefix = "mask_switch_rate";
 };
@@ -92,7 +90,7 @@ static bool parse_int(const char* s, int* out) {
 // CLI help text.
 static void usage(const char* argv0) {
   fprintf(stderr,
-          "Usage: %s [--tpcs list] [--iters N] [--blocks N] [--warmup N] [--csv-prefix name]\n"
+          "Usage: %s [--tpcs list] [--iters N] [--warmup N] [--csv-prefix name]\n"
           "  --tpcs list/range of TPCs (default: all), e.g. 0,1,4-7\n",
           argv0);
 }
@@ -119,8 +117,6 @@ static Config parse_cli(int argc, char** argv) {
       c.tpcs_spec = need("--tpcs");
     } else if (a == "--iters") {
       if (!parse_int(need("--iters"), &c.iters)) die("invalid --iters");
-    } else if (a == "--blocks") {
-      if (!parse_int(need("--blocks"), &c.blocks)) die("invalid --blocks");
     } else if (a == "--warmup") {
       if (!parse_int(need("--warmup"), &c.warmup)) die("invalid --warmup");
     } else if (a == "--csv-prefix") {
@@ -130,7 +126,7 @@ static Config parse_cli(int argc, char** argv) {
       die("unknown argument");
     }
   }
-  if (c.iters <= 0 || c.blocks <= 0 || c.warmup < 0) die("invalid numeric CLI options");
+  if (c.iters <= 0 || c.warmup < 0) die("invalid numeric CLI options");
   return c;
 }
 
@@ -218,11 +214,13 @@ static double pct(int a, int total) {
 
 // Minimal probe kernel for fast "set mask -> launch -> verify placement" cycles.
 // Thread 0 per block records SMID for host-side TPC inference.
-__global__ void probe_kernel(float* out, uint16_t* smid_per_block) {
+__global__ void probe_kernel(float* out, uint16_t* smid_out) {
   int smid = 0;
   asm("mov.u32 %0, %%smid;" : "=r"(smid));
-  if (threadIdx.x == 0) smid_per_block[blockIdx.x] = (uint16_t)smid;
-  if (threadIdx.x == 0) out[blockIdx.x] = (float)smid;
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    smid_out[0] = (uint16_t)smid;
+    out[0] = (float)smid;
+  }
 }
 
 // Infer TPC from SM ID using uniform "sms_per_tpc" partitioning.
@@ -295,17 +293,17 @@ int main(int argc, char** argv) {
   std::string summary_csv = out_dir + "/" + cfg.csv_prefix + "_summary.csv";
 
   printf("Device: %d SMs, %u TPCs (~%d SM/TPC)\n", num_sms, num_tpcs, sms_per_tpc);
-  printf("Single-stream switch-rate run: iters=%d blocks=%d warmup=%d schedule_len=%zu\n",
-         cfg.iters, cfg.blocks, cfg.warmup, schedule.size());
+  printf("Single-stream switch-rate run: iters=%d warmup=%d schedule_len=%zu\n",
+         cfg.iters, cfg.warmup, schedule.size());
 
   // 3) Allocate one stream and reusable buffers.
   cudaStream_t stream;
   cuda_check(cudaStreamCreate(&stream), "cudaStreamCreate");
   float* d_out = nullptr;
-  uint16_t* d_smids = nullptr;
-  cuda_check(cudaMalloc(&d_out, sizeof(float) * cfg.blocks), "cudaMalloc d_out");
-  cuda_check(cudaMalloc(&d_smids, sizeof(uint16_t) * cfg.blocks), "cudaMalloc d_smids");
-  std::vector<uint16_t> h_smids(cfg.blocks);
+  uint16_t* d_smid = nullptr;
+  cuda_check(cudaMalloc(&d_out, sizeof(float)), "cudaMalloc d_out");
+  cuda_check(cudaMalloc(&d_smid, sizeof(uint16_t)), "cudaMalloc d_smid");
+  uint16_t h_smid = 0;
 
   // 4) Warmup phase:
   //    Apply masks and run kernels without recording measurements to stabilize
@@ -313,7 +311,7 @@ int main(int argc, char** argv) {
   for (int i = 0; i < cfg.warmup; i++) {
     int req_tpc = schedule[i % schedule.size()];
     libsmctrl_set_stream_mask_ext((void*)stream, disable_mask_one_tpc(req_tpc));
-    probe_kernel<<<cfg.blocks, 256, 0, stream>>>(d_out, d_smids);
+    probe_kernel<<<1, 1, 0, stream>>>(d_out, d_smid);
   }
   cuda_check(cudaGetLastError(), "warmup launches");
   cuda_check(cudaStreamSynchronize(stream), "warmup sync");
@@ -332,38 +330,25 @@ int main(int argc, char** argv) {
 
     // cycle_us includes both software and GPU completion latency.
     uint64_t cy0 = sw0;
-    probe_kernel<<<cfg.blocks, 256, 0, stream>>>(d_out, d_smids);
+    probe_kernel<<<1, 1, 0, stream>>>(d_out, d_smid);
     cuda_check(cudaGetLastError(), "probe_kernel launch");
     cuda_check(cudaStreamSynchronize(stream), "iteration sync");
     uint64_t cy1 = now_ns();
 
-    cuda_check(cudaMemcpy(h_smids.data(), d_smids, sizeof(uint16_t) * cfg.blocks, cudaMemcpyDeviceToHost),
-               "smid memcpy");
+    cuda_check(cudaMemcpy(&h_smid, d_smid, sizeof(uint16_t), cudaMemcpyDeviceToHost), "smid memcpy");
 
-    // Build inferred TPC histogram for this iteration.
-    std::vector<int> tpc_hist(num_tpcs, 0);
+    // Single-sample placement check for this iteration.
     int inside = 0, outside = 0, invalid = 0;
-    for (int b = 0; b < cfg.blocks; b++) {
-      int sm = (int)h_smids[b];
-      int tpc = tpc_of_sm(sm, sms_per_tpc, num_tpcs);
-      if (tpc < 0) {
-        invalid++;
-        continue;
-      }
-      tpc_hist[tpc]++;
-      if (tpc == req_tpc) inside++;
-      else outside++;
+    int sm = (int)h_smid;
+    int tpc = tpc_of_sm(sm, sms_per_tpc, num_tpcs);
+    if (tpc < 0) {
+      invalid++;
+    } else if (tpc == req_tpc) {
+      inside++;
+    } else {
+      outside++;
     }
-
-    // "dominant_tpc" is the strongest single-bin indicator of actual placement.
-    int dominant_tpc = -1;
-    int dominant_blocks = -1;
-    for (uint32_t t = 0; t < num_tpcs; t++) {
-      if (tpc_hist[t] > dominant_blocks) {
-        dominant_blocks = tpc_hist[t];
-        dominant_tpc = (int)t;
-      }
-    }
+    int dominant_tpc = tpc;
 
     IterRow r;
     r.iter = i;
@@ -430,7 +415,7 @@ int main(int argc, char** argv) {
          iter_csv.c_str(), summary_csv.c_str());
 
   // 8) Explicit teardown.
-  cuda_check(cudaFree(d_smids), "cudaFree d_smids");
+  cuda_check(cudaFree(d_smid), "cudaFree d_smid");
   cuda_check(cudaFree(d_out), "cudaFree d_out");
   cuda_check(cudaStreamDestroy(stream), "cudaStreamDestroy");
   return 0;
