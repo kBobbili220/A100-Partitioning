@@ -1,0 +1,13 @@
+metric,value
+iterations,400
+switches_per_sec,7747.176174
+switch_overhead_us_mean,0.097590
+switch_overhead_us_median,0.098000
+switch_overhead_us_p95,0.119000
+switch_overhead_us_p99,0.126000
+cycle_us_mean,79.445122
+cycle_us_median,80.966000
+cycle_us_p95,83.715000
+cycle_us_p99,84.177000
+mismatch_count,0
+avg_outside_pct,0.000000

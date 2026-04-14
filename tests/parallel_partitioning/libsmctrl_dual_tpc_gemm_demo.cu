@@ -266,6 +266,8 @@ struct Workload {
   std::vector<int> h_sm_hist;
   std::vector<uint16_t> h_smid_per_block;
   float elapsed_ms = 0.0f;
+  std::vector<float> iter_start_ms;
+  std::vector<float> iter_end_ms;
 };
 
 // Map SM -> TPC using the same simple heuristic as the dynamic-switch demo.
@@ -399,6 +401,22 @@ static void write_metrics_csv(const char* path,
       fprintf(f, "tpc_hist,%s,%d,-1,%u,%llu,%.6f\n",
               w->label, pid, t, (unsigned long long)tpc_hist[t], w->elapsed_ms);
     }
+    for (int tpc : w->allowed_tpcs) {
+      fprintf(f, "tpc_set,%s,%d,-1,%d,1,%.6f\n",
+              w->label, pid, tpc, w->elapsed_ms);
+    }
+    const size_t n = std::min(w->iter_start_ms.size(), w->iter_end_ms.size());
+    for (size_t i = 0; i < n; i++) {
+      // For kernel_interval rows:
+      // - smid field stores iteration index
+      // - tpc field stores -1 (N/A)
+      // - blocks field stores interval end timestamp in microseconds
+      // - elapsed_ms field stores interval start timestamp in microseconds
+      const int end_us = (int)llround(w->iter_end_ms[i] * 1000.0);
+      const double start_us = (double)llround(w->iter_start_ms[i] * 1000.0);
+      fprintf(f, "kernel_interval,%s,%d,%d,-1,%d,%.0f\n",
+              w->label, pid, (int)i, end_us, start_us);
+    }
   }
   fclose(f);
 }
@@ -503,19 +521,33 @@ int main(int argc, char** argv) {
 
   // 7) Record independent stream durations and enqueue concurrent work.
   // We interleave A and B launches to maximize overlap opportunities.
-  cudaEvent_t a_start, a_end, b_start, b_end;
+  cudaEvent_t a_start, a_end, b_start, b_end, global_start;
   cuda_check(cudaEventCreate(&a_start), "cudaEventCreate a_start");
   cuda_check(cudaEventCreate(&a_end), "cudaEventCreate a_end");
   cuda_check(cudaEventCreate(&b_start), "cudaEventCreate b_start");
   cuda_check(cudaEventCreate(&b_end), "cudaEventCreate b_end");
+  cuda_check(cudaEventCreate(&global_start), "cudaEventCreate global_start");
+  std::vector<cudaEvent_t> a_iter_start(cfg.iters), a_iter_end(cfg.iters);
+  std::vector<cudaEvent_t> b_iter_start(cfg.iters), b_iter_end(cfg.iters);
+  for (int i = 0; i < cfg.iters; i++) {
+    cuda_check(cudaEventCreate(&a_iter_start[i]), "cudaEventCreate a_iter_start");
+    cuda_check(cudaEventCreate(&a_iter_end[i]), "cudaEventCreate a_iter_end");
+    cuda_check(cudaEventCreate(&b_iter_start[i]), "cudaEventCreate b_iter_start");
+    cuda_check(cudaEventCreate(&b_iter_end[i]), "cudaEventCreate b_iter_end");
+  }
 
+  cuda_check(cudaEventRecord(global_start, 0), "record global_start");
   cuda_check(cudaEventRecord(a_start, A.stream), "record a_start");
   cuda_check(cudaEventRecord(b_start, B.stream), "record b_start");
   for (int i = 0; i < cfg.iters; i++) {
+    cuda_check(cudaEventRecord(a_iter_start[i], A.stream), "record a_iter_start");
     gemm_probe_kernel<<<grid, block, 0, A.stream>>>(A.A, A.B, A.C, cfg.m, cfg.n, cfg.k, cfg.repeat,
                                                      A.d_sm_hist, A.d_smid_per_block);
+    cuda_check(cudaEventRecord(a_iter_end[i], A.stream), "record a_iter_end");
+    cuda_check(cudaEventRecord(b_iter_start[i], B.stream), "record b_iter_start");
     gemm_probe_kernel<<<grid, block, 0, B.stream>>>(B.A, B.B, B.C, cfg.m, cfg.n, cfg.k, cfg.repeat,
                                                      B.d_sm_hist, B.d_smid_per_block);
+    cuda_check(cudaEventRecord(b_iter_end[i], B.stream), "record b_iter_end");
   } 
   cuda_check(cudaGetLastError(), "measurement launch");
   cuda_check(cudaEventRecord(a_end, A.stream), "record a_end");
@@ -526,6 +558,16 @@ int main(int argc, char** argv) {
   cuda_check(cudaStreamSynchronize(B.stream), "sync B measurement");
   cuda_check(cudaEventElapsedTime(&A.elapsed_ms, a_start, a_end), "elapsed A");
   cuda_check(cudaEventElapsedTime(&B.elapsed_ms, b_start, b_end), "elapsed B");
+  A.iter_start_ms.resize(cfg.iters, 0.0f);
+  A.iter_end_ms.resize(cfg.iters, 0.0f);
+  B.iter_start_ms.resize(cfg.iters, 0.0f);
+  B.iter_end_ms.resize(cfg.iters, 0.0f);
+  for (int i = 0; i < cfg.iters; i++) {
+    cuda_check(cudaEventElapsedTime(&A.iter_start_ms[i], global_start, a_iter_start[i]), "elapsed A iter start");
+    cuda_check(cudaEventElapsedTime(&A.iter_end_ms[i], global_start, a_iter_end[i]), "elapsed A iter end");
+    cuda_check(cudaEventElapsedTime(&B.iter_start_ms[i], global_start, b_iter_start[i]), "elapsed B iter start");
+    cuda_check(cudaEventElapsedTime(&B.iter_end_ms[i], global_start, b_iter_end[i]), "elapsed B iter end");
+  }
 
   A.h_sm_hist.assign(num_sms, 0);
   B.h_sm_hist.assign(num_sms, 0);
@@ -576,5 +618,12 @@ int main(int argc, char** argv) {
   cudaEventDestroy(a_end);
   cudaEventDestroy(b_start);
   cudaEventDestroy(b_end);
+  cudaEventDestroy(global_start);
+  for (int i = 0; i < cfg.iters; i++) {
+    cudaEventDestroy(a_iter_start[i]);
+    cudaEventDestroy(a_iter_end[i]);
+    cudaEventDestroy(b_iter_start[i]);
+    cudaEventDestroy(b_iter_end[i]);
+  }
   return pass ? 0 : 2;
 }
