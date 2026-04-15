@@ -75,6 +75,11 @@ PARALLEL_PARTITION_DIR := ../tests/parallel_partitioning
 libsmctrl_dual_tpc_gemm_demo: $(PARALLEL_PARTITION_DIR)/libsmctrl_dual_tpc_gemm_demo.cu libsmctrl.a
 	$(NVCC) -ccbin $(CXX) $< -o $(PARALLEL_PARTITION_DIR)/$@ -g -I. -L. -l:libsmctrl.a $(LDFLAGS)
 
+# ----- Dual-process mask checker demo -----
+DUAL_PROCESS_MASK_CHECK_DIR := ../tests/mask_switch_rate_dual_process
+libsmctrl_dual_process_mask_check: $(DUAL_PROCESS_MASK_CHECK_DIR)/libsmctrl_dual_process_mask_check.cu libsmctrl.a
+	$(NVCC) -ccbin $(CXX) $< -o $(DUAL_PROCESS_MASK_CHECK_DIR)/$@ -g -I. -L. -l:libsmctrl.a $(LDFLAGS)
+
 all: libsmctrl.so libcuda.so.1 nvtaskset tests
 
 clean:
@@ -85,7 +90,8 @@ clean:
 	      libsmctrl_test_next_mask libsmctrl_test_next_mask_override \
 	      nvtaskset libcuda.so.1 $(DYNAMIC_SWITCH_DIR)/libsmctrl_dynamic_switch_demo \
 	      $(MASK_SWITCH_RATE_DIR)/libsmctrl_mask_switch_rate_demo \
-	      $(PARALLEL_PARTITION_DIR)/libsmctrl_dual_tpc_gemm_demo
+	      $(PARALLEL_PARTITION_DIR)/libsmctrl_dual_tpc_gemm_demo \
+	      $(DUAL_PROCESS_MASK_CHECK_DIR)/libsmctrl_dual_process_mask_check
 
 # On L4T (Linux4Tegra), the paths are different, and there may be multiple copies of libcuda.so.1
 install: libcuda.so.1

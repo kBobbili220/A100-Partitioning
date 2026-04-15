@@ -1,0 +1,15 @@
+metric,value
+iterations,20000
+switch_us_mean,0.073293
+switch_us_median,0.071000
+switch_us_p95,0.093000
+switch_us_p99,0.095000
+launch_us_mean,6.940529
+launch_us_median,6.907000
+launch_us_p95,7.194000
+launch_us_p99,7.511000
+set_and_launch_us_mean,7.013822
+set_and_launch_us_median,6.980000
+set_and_launch_us_p95,7.268000
+set_and_launch_us_p99,7.582000
+launches_per_sec,140874.961708
