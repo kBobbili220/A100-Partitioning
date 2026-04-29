@@ -85,6 +85,11 @@ SINGLE_PROCESS_DYNAMIC_MASK_DIR := ../tests/mask_switch_rate_single_process_dyna
 libsmctrl_single_process_dynamic_mask_matmul: $(SINGLE_PROCESS_DYNAMIC_MASK_DIR)/libsmctrl_single_process_dynamic_mask_matmul.cu libsmctrl.a
 	$(NVCC) -ccbin $(CXX) $< -o $(SINGLE_PROCESS_DYNAMIC_MASK_DIR)/$@ -g -I. -L. -l:libsmctrl.a $(LDFLAGS)
 
+# ----- Two-process dynamic mask matmul benchmark -----
+TWO_PROCESS_DYNAMIC_MASK_DIR := ../tests/mask_switch_rate_two_process_dynamic
+libsmctrl_two_process_dynamic_mask_matmul: $(TWO_PROCESS_DYNAMIC_MASK_DIR)/libsmctrl_two_process_dynamic_mask_matmul.cu libsmctrl.a
+	$(NVCC) -ccbin $(CXX) $< -o $(TWO_PROCESS_DYNAMIC_MASK_DIR)/$@ -g -I. -L. -l:libsmctrl.a $(LDFLAGS) -Xcompiler -pthread
+
 all: libsmctrl.so libcuda.so.1 nvtaskset tests
 
 clean:
@@ -97,7 +102,8 @@ clean:
 	      $(MASK_SWITCH_RATE_DIR)/libsmctrl_mask_switch_rate_demo \
 	      $(PARALLEL_PARTITION_DIR)/libsmctrl_dual_tpc_gemm_demo \
 	      $(DUAL_PROCESS_MASK_CHECK_DIR)/libsmctrl_dual_process_mask_check \
-	      $(SINGLE_PROCESS_DYNAMIC_MASK_DIR)/libsmctrl_single_process_dynamic_mask_matmul
+	      $(SINGLE_PROCESS_DYNAMIC_MASK_DIR)/libsmctrl_single_process_dynamic_mask_matmul \
+	      $(TWO_PROCESS_DYNAMIC_MASK_DIR)/libsmctrl_two_process_dynamic_mask_matmul
 
 # On L4T (Linux4Tegra), the paths are different, and there may be multiple copies of libcuda.so.1
 install: libcuda.so.1
